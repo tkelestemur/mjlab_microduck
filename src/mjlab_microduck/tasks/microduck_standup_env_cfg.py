@@ -10,19 +10,10 @@ drives body pose control — [Δz (m), Δpitch (rad), Δroll (rad)].
 import math
 from copy import deepcopy
 
-# Domain randomization toggles
-ENABLE_COM_RANDOMIZATION = True
-ENABLE_KP_RANDOMIZATION = True
-ENABLE_KD_RANDOMIZATION = True
-ENABLE_MASS_INERTIA_RANDOMIZATION = True
-ENABLE_IMU_ORIENTATION_RANDOMIZATION = True
-
-# Domain randomization ranges
-COM_RANDOMIZATION_RANGE = 0.003
-MASS_INERTIA_RANDOMIZATION_RANGE = (0.95, 1.05)
-KP_RANDOMIZATION_RANGE = (0.85, 1.15)
-KD_RANDOMIZATION_RANGE = (0.9, 1.1)
-IMU_ORIENTATION_RANDOMIZATION_ANGLE = 1.0
+from mjlab_microduck.tasks.domain_randomization import (
+    DomainRandomizationCfg,
+    add_domain_randomization_events,
+)
 
 # Body pose command control
 # Nominal standing CoM height (midpoint of [0.08, 0.11] m)
@@ -292,53 +283,11 @@ def make_microduck_standup_env_cfg(play: bool = False, rough: bool = False) -> M
         mode="reset",
     )
 
-    # Domain randomization
-    if ENABLE_COM_RANDOMIZATION:
-        cfg.events["randomize_com"] = EventTermCfg(
-            func=velocity_mdp.randomize_field,
-            mode="reset",
-            domain_randomization=True,
-            params={
-                "asset_cfg": SceneEntityCfg("robot", body_names=("trunk_base",)),
-                "operation": "add",
-                "field": "body_ipos",
-                "ranges": (-COM_RANDOMIZATION_RANGE, COM_RANDOMIZATION_RANGE),
-            },
-        )
-
-    if ENABLE_KP_RANDOMIZATION or ENABLE_KD_RANDOMIZATION:
-        kp_range = KP_RANDOMIZATION_RANGE if ENABLE_KP_RANDOMIZATION else (1.0, 1.0)
-        kd_range = KD_RANDOMIZATION_RANGE if ENABLE_KD_RANDOMIZATION else (1.0, 1.0)
-        cfg.events["randomize_motor_gains"] = EventTermCfg(
-            func=microduck_mdp.randomize_delayed_actuator_gains,
-            mode="reset",
-            params={
-                "asset_cfg": SceneEntityCfg("robot"),
-                "operation": "scale",
-                "kp_range": kp_range,
-                "kd_range": kd_range,
-            },
-        )
-
-    if ENABLE_MASS_INERTIA_RANDOMIZATION:
-        cfg.events["randomize_mass_inertia"] = EventTermCfg(
-            func=microduck_mdp.randomize_mass_and_inertia,
-            mode="reset",
-            params={
-                "asset_cfg": SceneEntityCfg("robot", body_names=("trunk_base",)),
-                "scale_range": MASS_INERTIA_RANDOMIZATION_RANGE,
-            },
-        )
-
-    if ENABLE_IMU_ORIENTATION_RANDOMIZATION:
-        cfg.events["randomize_imu_orientation"] = EventTermCfg(
-            func=microduck_mdp.randomize_imu_orientation,
-            mode="reset",
-            params={
-                "asset_cfg": SceneEntityCfg("robot"),
-                "max_angle_deg": IMU_ORIENTATION_RANDOMIZATION_ANGLE,
-            },
-        )
+    # Domain randomization (no velocity pushes or base orientation for standup)
+    add_domain_randomization_events(
+        cfg,
+        DomainRandomizationCfg(enable_velocity_pushes=False),
+    )
 
     # === CURRICULUM ===
     if not rough:

@@ -16,24 +16,10 @@ avoid synchronised oscillations.  PERIOD = 4 s (2 s down + 2 s up).
 
 from copy import deepcopy
 
-# ── Domain randomisation (same as velocity env, neck offset disabled) ─────────
-ENABLE_COM_RANDOMIZATION          = True
-ENABLE_KP_RANDOMIZATION           = True
-ENABLE_KD_RANDOMIZATION           = True
-ENABLE_MASS_INERTIA_RANDOMIZATION = True
-ENABLE_VELOCITY_PUSHES            = True
-ENABLE_IMU_ORIENTATION_RANDOMIZATION = True
-ENABLE_BASE_ORIENTATION_RANDOMIZATION = False
-ENABLE_NECK_OFFSET_RANDOMIZATION  = False   # disabled — head is used for the task
-
-# ── Ranges (copied from velocity env) ─────────────────────────────────────────
-COM_RANDOMIZATION_RANGE          = 0.003
-MASS_INERTIA_RANDOMIZATION_RANGE = (0.95, 1.05)
-KP_RANDOMIZATION_RANGE           = (0.85, 1.15)
-KD_RANDOMIZATION_RANGE           = (0.9, 1.1)
-VELOCITY_PUSH_INTERVAL_S         = (3.0, 6.0)
-VELOCITY_PUSH_RANGE              = (-0.3, 0.3)
-IMU_ORIENTATION_RANDOMIZATION_ANGLE = 1.0
+from mjlab_microduck.tasks.domain_randomization import (
+    DomainRandomizationCfg,
+    add_domain_randomization_events,
+)
 
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
@@ -253,67 +239,8 @@ def make_microduck_ground_pick_env_cfg(play: bool = False, rough: bool = False) 
     cfg.events["foot_friction"].params["asset_cfg"].geom_names = foot_frictions_geom_names
     cfg.events["reset_base"].params["pose_range"]["z"] = (0.12, 0.13)
 
-    if ENABLE_VELOCITY_PUSHES:
-        interval = (0.5, 1.0) if play else VELOCITY_PUSH_INTERVAL_S
-        cfg.events["push_robot"] = EventTermCfg(
-            func=mdp.push_by_setting_velocity,
-            mode="interval",
-            interval_range_s=interval,
-            params={
-                "velocity_range": {
-                    "x": VELOCITY_PUSH_RANGE,
-                    "y": VELOCITY_PUSH_RANGE,
-                },
-                "asset_cfg": SceneEntityCfg("robot"),
-            },
-        )
-
-    if ENABLE_COM_RANDOMIZATION:
-        cfg.events["randomize_com"] = EventTermCfg(
-            func=mdp.randomize_field,
-            mode="reset",
-            domain_randomization=True,
-            params={
-                "asset_cfg": SceneEntityCfg("robot", body_names=("trunk_base",)),
-                "operation": "add",
-                "field": "body_ipos",
-                "ranges": (-COM_RANDOMIZATION_RANGE, COM_RANDOMIZATION_RANGE),
-            },
-        )
-
-    if ENABLE_KP_RANDOMIZATION or ENABLE_KD_RANDOMIZATION:
-        kp_range = KP_RANDOMIZATION_RANGE if ENABLE_KP_RANDOMIZATION else (1.0, 1.0)
-        kd_range = KD_RANDOMIZATION_RANGE if ENABLE_KD_RANDOMIZATION else (1.0, 1.0)
-        cfg.events["randomize_motor_gains"] = EventTermCfg(
-            func=microduck_mdp.randomize_delayed_actuator_gains,
-            mode="reset",
-            params={
-                "asset_cfg": SceneEntityCfg("robot"),
-                "operation": "scale",
-                "kp_range": kp_range,
-                "kd_range": kd_range,
-            },
-        )
-
-    if ENABLE_MASS_INERTIA_RANDOMIZATION:
-        cfg.events["randomize_mass_inertia"] = EventTermCfg(
-            func=microduck_mdp.randomize_mass_and_inertia,
-            mode="reset",
-            params={
-                "asset_cfg": SceneEntityCfg("robot", body_names=("trunk_base",)),
-                "scale_range": MASS_INERTIA_RANDOMIZATION_RANGE,
-            },
-        )
-
-    if ENABLE_IMU_ORIENTATION_RANDOMIZATION:
-        cfg.events["randomize_imu_orientation"] = EventTermCfg(
-            func=microduck_mdp.randomize_imu_orientation,
-            mode="reset",
-            params={
-                "asset_cfg": SceneEntityCfg("robot"),
-                "max_angle_deg": IMU_ORIENTATION_RANDOMIZATION_ANGLE,
-            },
-        )
+    # Domain randomization (uses shared defaults)
+    add_domain_randomization_events(cfg, DomainRandomizationCfg(), play=play)
 
     # ── Terrain ───────────────────────────────────────────────────────────────
     if not rough:
