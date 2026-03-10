@@ -21,6 +21,8 @@ if TYPE_CHECKING:
 
 _DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
 
+# Leg joint indices (left hip-ankle: 0-4, right hip-ankle: 9-13)
+_LEG_JOINT_INDICES = list(range(0, 5)) + list(range(9, 14))
 # Neck/head joint indices (neck_pitch=5, head_pitch=6, head_yaw=7, head_roll=8)
 _NECK_JOINT_INDICES = list(range(5, 9))
 # Time constant (seconds) for smooth offset interpolation toward target
@@ -143,7 +145,7 @@ def reset_action_history(
     if hasattr(env, '_prev_leg_actions'):
         # Set to current action (or zero if no action yet)
         if hasattr(env, 'action_manager') and env.action_manager.action is not None:
-            leg_joint_indices = list(range(0, 5)) + list(range(9, 14))
+            leg_joint_indices = _LEG_JOINT_INDICES
             env._prev_leg_actions[env_ids] = env.action_manager.action[env_ids][:, leg_joint_indices]
         else:
             env._prev_leg_actions[env_ids] = 0.0
@@ -151,7 +153,7 @@ def reset_action_history(
     # Reset neck action rate cache
     if hasattr(env, '_prev_neck_actions'):
         if hasattr(env, 'action_manager') and env.action_manager.action is not None:
-            neck_joint_indices = list(range(5, 9))
+            neck_joint_indices = _NECK_JOINT_INDICES
             env._prev_neck_actions[env_ids] = env.action_manager.action[env_ids][:, neck_joint_indices]
         else:
             env._prev_neck_actions[env_ids] = 0.0
@@ -159,7 +161,7 @@ def reset_action_history(
     # Reset leg action acceleration cache
     if hasattr(env, '_prev_leg_actions_for_acc'):
         if hasattr(env, 'action_manager') and env.action_manager.action is not None:
-            leg_joint_indices = list(range(0, 5)) + list(range(9, 14))
+            leg_joint_indices = _LEG_JOINT_INDICES
             current_action = env.action_manager.action[env_ids][:, leg_joint_indices]
             env._prev_leg_actions_for_acc[env_ids] = current_action
             env._prev_prev_leg_actions_for_acc[env_ids] = current_action
@@ -170,7 +172,7 @@ def reset_action_history(
     # Reset neck action acceleration cache
     if hasattr(env, '_prev_neck_actions_for_acc'):
         if hasattr(env, 'action_manager') and env.action_manager.action is not None:
-            neck_joint_indices = list(range(5, 9))
+            neck_joint_indices = _NECK_JOINT_INDICES
             current_action = env.action_manager.action[env_ids][:, neck_joint_indices]
             env._prev_neck_actions_for_acc[env_ids] = current_action
             env._prev_prev_neck_actions_for_acc[env_ids] = current_action
@@ -296,8 +298,8 @@ def imitation_reward(
     joints_vel = asset.data.joint_vel[:, asset_cfg.joint_ids]
 
     # Separate leg joints (indices 0-4, 9-13) from neck joints (indices 5-8)
-    leg_joint_indices = list(range(0, 5)) + list(range(9, 14))  # 10 leg joints
-    neck_joint_indices = list(range(5, 9))  # 4 neck joints
+    leg_joint_indices = _LEG_JOINT_INDICES  # 10 leg joints
+    neck_joint_indices = _NECK_JOINT_INDICES  # 4 neck joints
 
     leg_joints_pos = joints_pos[:, leg_joint_indices]
     neck_joints_pos = joints_pos[:, neck_joint_indices]
@@ -524,7 +526,7 @@ def leg_action_rate_l2(
         Penalty tensor of shape (num_envs,)
     """
     # Get leg joint indices
-    leg_joint_indices = list(range(0, 5)) + list(range(9, 14))
+    leg_joint_indices = _LEG_JOINT_INDICES
 
     # Get current and previous actions for leg joints only
     # Actions are stored in env (assuming the action is available)
@@ -563,7 +565,7 @@ def neck_action_rate_l2(
         Penalty tensor of shape (num_envs,)
     """
     # Get neck joint indices
-    neck_joint_indices = list(range(5, 9))
+    neck_joint_indices = _NECK_JOINT_INDICES
 
     # Get current and previous actions for neck joints only
     if not hasattr(env, 'action_manager'):
@@ -600,7 +602,7 @@ def leg_action_acceleration_l2(
         Penalty tensor of shape (num_envs,)
     """
     # Get leg joint indices
-    leg_joint_indices = list(range(0, 5)) + list(range(9, 14))
+    leg_joint_indices = _LEG_JOINT_INDICES
 
     if not hasattr(env, 'action_manager'):
         return torch.zeros(env.num_envs, device=env.device)
@@ -639,7 +641,7 @@ def neck_action_acceleration_l2(
         Penalty tensor of shape (num_envs,)
     """
     # Get neck joint indices
-    neck_joint_indices = list(range(5, 9))
+    neck_joint_indices = _NECK_JOINT_INDICES
 
     if not hasattr(env, 'action_manager'):
         return torch.zeros(env.num_envs, device=env.device)
@@ -771,7 +773,7 @@ def neck_joint_vel_l2(
     asset: Entity = env.scene[asset_cfg.name]
 
     # Get neck joint indices (neck_pitch, head_pitch, head_yaw, head_roll)
-    neck_joint_indices = list(range(5, 9))
+    neck_joint_indices = _NECK_JOINT_INDICES
 
     # Get joint velocities for neck joints
     joint_vel = asset.data.joint_vel[:, asset_cfg.joint_ids]
@@ -798,7 +800,7 @@ def leg_joint_vel_l2(
     asset: Entity = env.scene[asset_cfg.name]
 
     # Get leg joint indices (left hip-ankle: 0-4, right hip-ankle: 9-13)
-    leg_joint_indices = list(range(0, 5)) + list(range(9, 14))
+    leg_joint_indices = _LEG_JOINT_INDICES
 
     # Get joint velocities for leg joints
     joint_vel = asset.data.joint_vel[:, asset_cfg.joint_ids]
@@ -1587,7 +1589,7 @@ def joint_vel_l2_when_standing(
     total_speed = torch.norm(command[:, :2], dim=1) + torch.abs(command[:, 2])
     is_standing_cmd = (total_speed < command_threshold).float()
 
-    leg_indices = list(range(0, 5)) + list(range(9, 14))
+    leg_indices = _LEG_JOINT_INDICES
     joint_vel = asset.data.joint_vel[:, leg_indices]
     vel_sq = torch.sum(joint_vel ** 2, dim=-1)
 

@@ -57,6 +57,7 @@ from mjlab.utils.noise import UniformNoiseCfg as Unoise
 
 from mjlab_microduck.robot.microduck_constants import MICRODUCK_GROUND_PICK_ROBOT_CFG
 from mjlab_microduck.tasks import mdp as microduck_mdp
+from mjlab_microduck.tasks.mdp import _LEG_JOINT_INDICES, _NECK_JOINT_INDICES
 from mjlab_microduck.tasks.microduck_velocity_env_cfg import MICRODUCK_ROUGH_TERRAINS_CFG
 
 
@@ -145,28 +146,26 @@ def make_microduck_ground_pick_env_cfg(play: bool = False, rough: bool = False) 
     )
 
     # Return phase — legs (joints 0-4 left, 9-13 right): relaxed std, robust to pushes.
-    _LEG_JOINTS = [0, 1, 2, 3, 4, 9, 10, 11, 12, 13]
     cfg.rewards["ground_pick_return_pose_legs"] = RewardTermCfg(
         func=microduck_mdp.ground_pick_return_pose,
         weight=4.0,
         params={
             "std": 0.3,
             "command_name": "twist",
-            "joint_indices": _LEG_JOINTS,
+            "joint_indices": _LEG_JOINT_INDICES,
         },
     )
 
     # Return phase — neck/head (joints 5-8): tight std to prevent backward overshoot
     # and head-body collision (head geoms have no collision mesh, so self_collisions
     # can't catch it — the pose reward is the only guard).
-    _NECK_JOINTS = [5, 6, 7, 8]
     cfg.rewards["ground_pick_return_pose_neck"] = RewardTermCfg(
         func=microduck_mdp.ground_pick_return_pose,
         weight=6.0,
         params={
             "std": 0.15,
             "command_name": "twist",
-            "joint_indices": _NECK_JOINTS,
+            "joint_indices": _NECK_JOINT_INDICES,
         },
     )
 
