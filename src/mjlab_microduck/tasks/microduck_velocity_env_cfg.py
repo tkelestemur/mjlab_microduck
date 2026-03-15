@@ -22,16 +22,16 @@ from mjlab.terrains.terrain_generator import TerrainGeneratorCfg
 
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
-from mjlab.managers.manager_term_config import (
+from mjlab.managers import (
     CurriculumTermCfg,
     EventTermCfg,
     ObservationTermCfg,
     RewardTermCfg,
+    SceneEntityCfg,
 )
-from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.rl import (
+    RslRlModelCfg,
     RslRlOnPolicyRunnerCfg,
-    RslRlPpoActorCriticCfg,
     RslRlPpoAlgorithmCfg,
 )
 from mjlab.sensor import ContactMatch, ContactSensorCfg
@@ -161,10 +161,6 @@ def make_microduck_velocity_env_cfg(
     # ]:
     #     del cfg.rewards[to_remove]
 
-    cfg.observations["critic"].terms["foot_height"].params[
-        "asset_cfg"
-    ].site_names = site_names
-
     # Robot setup
     cfg.scene.entities = {"robot": MICRODUCK_WALK_ROBOT_CFG}
     cfg.scene.sensors = (feet_ground_cfg, self_collision_cfg)
@@ -175,7 +171,7 @@ def make_microduck_velocity_env_cfg(
     assert isinstance(joint_pos_action, JointPositionActionCfg)
     joint_pos_action.scale = 1.0
     if ENABLE_NECK_OFFSET_RANDOMIZATION:
-        joint_pos_action.class_type = microduck_mdp.NeckOffsetJointPositionAction
+        joint_pos_action.build = lambda env, _cfg=joint_pos_action: microduck_mdp.NeckOffsetJointPositionAction(_cfg, env)
 
     # === REWARDS ===
     # Pose reward configuration
@@ -345,8 +341,12 @@ def make_microduck_velocity_env_cfg(
     # Domain randomization (uses shared defaults from DomainRandomizationCfg)
     add_domain_randomization_events(cfg, DomainRandomizationCfg(), play=play)
 
-    # Observations
-    del cfg.observations["policy"].terms["base_lin_vel"]
+    # Observations — remove terms that need sensors not present on microduck
+    del cfg.observations["actor"].terms["base_lin_vel"]
+    del cfg.observations["actor"].terms["height_scan"]
+    del cfg.observations["critic"].terms["height_scan"]
+    del cfg.observations["critic"].terms["foot_height"]
+    del cfg.observations["critic"].terms["foot_contact_forces"]
 
     # Add base_lin_vel to critic only (privileged information)
     cfg.observations["critic"].terms["base_lin_vel"] = ObservationTermCfg(
@@ -360,32 +360,32 @@ def make_microduck_velocity_env_cfg(
     # Replace projected_gravity with raw_accelerometer if flag is False
     if not USE_PROJECTED_GRAVITY:
         # Remove projected_gravity and add raw_accelerometer
-        del cfg.observations["policy"].terms["projected_gravity"]
-        cfg.observations["policy"].terms["raw_accelerometer"] = ObservationTermCfg(
+        del cfg.observations["actor"].terms["projected_gravity"]
+        cfg.observations["actor"].terms["raw_accelerometer"] = ObservationTermCfg(
             func=microduck_mdp.raw_accelerometer,
             scale=1.0,
         )
 
-    cfg.observations["policy"].terms[gravity_term_name] = deepcopy(
-        cfg.observations["policy"].terms[gravity_term_name]
+    cfg.observations["actor"].terms[gravity_term_name] = deepcopy(
+        cfg.observations["actor"].terms[gravity_term_name]
     )
-    cfg.observations["policy"].terms["base_ang_vel"] = deepcopy(
-        cfg.observations["policy"].terms["base_ang_vel"]
+    cfg.observations["actor"].terms["base_ang_vel"] = deepcopy(
+        cfg.observations["actor"].terms["base_ang_vel"]
     )
 
-    cfg.observations["policy"].terms["base_ang_vel"].delay_min_lag = 0
-    cfg.observations["policy"].terms["base_ang_vel"].delay_max_lag = 3
-    cfg.observations["policy"].terms["base_ang_vel"].delay_update_period = 64
+    cfg.observations["actor"].terms["base_ang_vel"].delay_min_lag = 0
+    cfg.observations["actor"].terms["base_ang_vel"].delay_max_lag = 3
+    cfg.observations["actor"].terms["base_ang_vel"].delay_update_period = 64
 
-    cfg.observations["policy"].terms[gravity_term_name].delay_min_lag = 0
-    cfg.observations["policy"].terms[gravity_term_name].delay_max_lag = 3
-    cfg.observations["policy"].terms[gravity_term_name].delay_update_period = 64
+    cfg.observations["actor"].terms[gravity_term_name].delay_min_lag = 0
+    cfg.observations["actor"].terms[gravity_term_name].delay_max_lag = 3
+    cfg.observations["actor"].terms[gravity_term_name].delay_update_period = 64
 
     # Observation noise configuration (edit these values as needed)
-    cfg.observations["policy"].terms["base_ang_vel"].noise = Unoise(n_min=-0.024, n_max=0.024) # was 0.2
-    cfg.observations["policy"].terms[gravity_term_name].noise = Unoise(n_min=-0.007, n_max=0.007)  # was 0.15
-    cfg.observations["policy"].terms["joint_pos"].noise = Unoise(n_min=-0.0006, n_max=0.0006)  # was 0.05
-    cfg.observations["policy"].terms["joint_vel"].noise = Unoise(n_min=-0.024, n_max=0.024)  # was 2.0
+    cfg.observations["actor"].terms["base_ang_vel"].noise = Unoise(n_min=-0.024, n_max=0.024) # was 0.2
+    cfg.observations["actor"].terms[gravity_term_name].noise = Unoise(n_min=-0.007, n_max=0.007)  # was 0.15
+    cfg.observations["actor"].terms["joint_pos"].noise = Unoise(n_min=-0.0006, n_max=0.0006)  # was 0.05
+    cfg.observations["actor"].terms["joint_vel"].noise = Unoise(n_min=-0.024, n_max=0.024)  # was 2.0
 
     # Commands
     command: UniformVelocityCommandCfg = cfg.commands["twist"]
@@ -395,7 +395,7 @@ def make_microduck_velocity_env_cfg(
     command.ranges.lin_vel_y = (-0.3, 0.3)
     command.ranges.ang_vel_z = (-1.5, 1.5)
     command.viz.z_offset = 0.5
-    command.class_type = microduck_mdp.VelocityCommandCommandOnly
+    command.build = lambda env, _cfg=command: microduck_mdp.VelocityCommandCommandOnly(_cfg, env)
 
     # Terrain
     if not rough:
@@ -411,10 +411,10 @@ def make_microduck_velocity_env_cfg(
 
     # Add action rate curriculum
     cfg.curriculum["action_rate_weight"] = CurriculumTermCfg(
-        func=mdp.reward_weight,
+        func=mdp.reward_curriculum,
         params={
             "reward_name": "action_rate_l2",
-            "weight_stages": [
+            "stages": [
                 # 250 iterations × 24 steps/iter = 6000 steps
                 {"step": 0, "weight": -0.4},
                 {"step": 250 * 24, "weight": -0.8},
@@ -430,10 +430,10 @@ def make_microduck_velocity_env_cfg(
 
     # Add linear velocity tracking curriculum
     # cfg.curriculum["linear_velocity_weight"] = CurriculumTermCfg(
-        # func=mdp.reward_weight,
+        # func=mdp.reward_curriculum,
         # params={
             # "reward_name": "track_linear_velocity",
-            # "weight_stages": [
+            # "stages": [
                 # {"step": 0, "weight": 2.0},
                 # {"step": 500 * 24, "weight": 3.0},
                 # {"step": 750 * 24, "weight": 4.0},
@@ -443,10 +443,10 @@ def make_microduck_velocity_env_cfg(
 
     # Add angular velocity tracking curriculum
     # cfg.curriculum["angular_velocity_weight"] = CurriculumTermCfg(
-        # func=mdp.reward_weight,
+        # func=mdp.reward_curriculum,
         # params={
             # "reward_name": "track_angular_velocity",
-            # "weight_stages": [
+            # "stages": [
                 # {"step": 0, "weight": 2.0},
                 # {"step": 500 * 24, "weight": 3.0},
                 # {"step": 750 * 24, "weight": 4.0},
@@ -536,13 +536,16 @@ def make_microduck_velocity_env_cfg(
 
 
 MicroduckRlCfg = RslRlOnPolicyRunnerCfg(
-    policy=RslRlPpoActorCriticCfg(
-        init_noise_std=1.0,
-        actor_obs_normalization=False,
-        critic_obs_normalization=False,
-        actor_hidden_dims=(512, 256, 128),
-        critic_hidden_dims=(512, 256, 128),
+    actor=RslRlModelCfg(
+        hidden_dims=(512, 256, 128),
         activation="elu",
+        obs_normalization=False,
+        distribution_cfg={"class_name": "GaussianDistribution", "init_std": 1.0, "std_type": "scalar"},
+    ),
+    critic=RslRlModelCfg(
+        hidden_dims=(512, 256, 128),
+        activation="elu",
+        obs_normalization=False,
     ),
     algorithm=RslRlPpoAlgorithmCfg(
         value_loss_coef=1.0,

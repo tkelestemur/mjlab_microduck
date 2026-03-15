@@ -13,9 +13,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from mjlab.managers.manager_term_config import EventTermCfg
-from mjlab.managers.scene_entity_config import SceneEntityCfg
-from mjlab.tasks.velocity import mdp as velocity_mdp
+from mjlab.envs.mdp import dr
+from mjlab.envs.mdp.events import push_by_setting_velocity
+from mjlab.managers import EventTermCfg, SceneEntityCfg
 
 from mjlab_microduck.tasks import mdp as microduck_mdp
 
@@ -72,33 +72,31 @@ class DomainRandomizationCfg:
 
 def add_domain_randomization_events(
     cfg: ManagerBasedRlEnvCfg,
-    dr: DomainRandomizationCfg,
+    dr_cfg: DomainRandomizationCfg,
     *,
     play: bool = False,
 ) -> None:
-    """Add standard domain randomization events to *cfg* based on *dr*.
+    """Add standard domain randomization events to *cfg* based on *dr_cfg*.
 
     Args:
         cfg: The environment configuration to modify in-place.
-        dr: Domain randomization configuration with toggles and ranges.
+        dr_cfg: Domain randomization configuration with toggles and ranges.
         play: If ``True``, shorten push intervals for better visibility.
     """
-    if dr.enable_com:
+    if dr_cfg.enable_com:
         cfg.events["randomize_com"] = EventTermCfg(
-            func=velocity_mdp.randomize_field,
+            func=dr.body_ipos,
             mode="reset",
-            domain_randomization=True,
             params={
                 "asset_cfg": SceneEntityCfg("robot", body_names=("trunk_base",)),
                 "operation": "add",
-                "field": "body_ipos",
-                "ranges": (-dr.com_range, dr.com_range),
+                "ranges": (-dr_cfg.com_range, dr_cfg.com_range),
             },
         )
 
-    if dr.enable_kp or dr.enable_kd:
-        kp = dr.kp_range if dr.enable_kp else (1.0, 1.0)
-        kd = dr.kd_range if dr.enable_kd else (1.0, 1.0)
+    if dr_cfg.enable_kp or dr_cfg.enable_kd:
+        kp = dr_cfg.kp_range if dr_cfg.enable_kp else (1.0, 1.0)
+        kd = dr_cfg.kd_range if dr_cfg.enable_kd else (1.0, 1.0)
         cfg.events["randomize_motor_gains"] = EventTermCfg(
             func=microduck_mdp.randomize_delayed_actuator_gains,
             mode="reset",
@@ -110,74 +108,70 @@ def add_domain_randomization_events(
             },
         )
 
-    if dr.enable_mass_inertia:
+    if dr_cfg.enable_mass_inertia:
         cfg.events["randomize_mass_inertia"] = EventTermCfg(
             func=microduck_mdp.randomize_mass_and_inertia,
             mode="reset",
             params={
                 "asset_cfg": SceneEntityCfg("robot", body_names=("trunk_base",)),
-                "scale_range": dr.mass_inertia_range,
+                "scale_range": dr_cfg.mass_inertia_range,
             },
         )
 
-    if dr.enable_joint_friction:
+    if dr_cfg.enable_joint_friction:
         cfg.events["randomize_joint_friction"] = EventTermCfg(
-            func=velocity_mdp.randomize_field,
+            func=dr.joint_friction,
             mode="reset",
-            domain_randomization=True,
             params={
                 "asset_cfg": SceneEntityCfg("robot", joint_names=(r".*",)),
                 "operation": "scale",
-                "field": "dof_frictionloss",
-                "ranges": dr.joint_friction_range,
+                "ranges": dr_cfg.joint_friction_range,
             },
         )
 
-    if dr.enable_joint_damping:
+    if dr_cfg.enable_joint_damping:
         cfg.events["randomize_joint_damping"] = EventTermCfg(
-            func=velocity_mdp.randomize_field,
+            func=dr.joint_damping,
             mode="reset",
-            domain_randomization=True,
             params={
                 "asset_cfg": SceneEntityCfg("robot", joint_names=(r".*",)),
                 "operation": "scale",
-                "field": "dof_damping",
-                "ranges": dr.joint_damping_range,
+                "ranges": dr_cfg.joint_damping_range,
             },
         )
 
-    if dr.enable_velocity_pushes:
-        interval = (0.5, 1.0) if play else dr.velocity_push_interval_s
+    if dr_cfg.enable_velocity_pushes:
+        interval = (0.5, 1.0) if play else dr_cfg.velocity_push_interval_s
         cfg.events["push_robot"] = EventTermCfg(
-            func=velocity_mdp.push_by_setting_velocity,
+            func=push_by_setting_velocity,
             mode="interval",
             interval_range_s=interval,
             params={
                 "velocity_range": {
-                    "x": dr.velocity_push_range,
-                    "y": dr.velocity_push_range,
+                    "x": dr_cfg.velocity_push_range,
+                    "y": dr_cfg.velocity_push_range,
                 },
                 "asset_cfg": SceneEntityCfg("robot"),
             },
         )
 
-    if dr.enable_imu_orientation:
+    if dr_cfg.enable_imu_orientation:
         cfg.events["randomize_imu_orientation"] = EventTermCfg(
             func=microduck_mdp.randomize_imu_orientation,
             mode="reset",
             params={
                 "asset_cfg": SceneEntityCfg("robot"),
-                "max_angle_deg": dr.imu_orientation_angle,
+                "max_angle_deg": dr_cfg.imu_orientation_angle,
             },
         )
 
-    if dr.enable_base_orientation:
+    if dr_cfg.enable_base_orientation:
         cfg.events["randomize_base_orientation"] = EventTermCfg(
             func=microduck_mdp.randomize_base_orientation,
             mode="reset",
             params={
                 "asset_cfg": SceneEntityCfg("robot"),
-                "max_pitch_deg": dr.base_orientation_max_pitch_deg,
-                "max_roll_deg": dr.base_orientation_max_roll_deg,
+                "max_pitch_deg": dr_cfg.base_orientation_max_pitch_deg,
+                "max_roll_deg": dr_cfg.base_orientation_max_roll_deg,
             },
         )

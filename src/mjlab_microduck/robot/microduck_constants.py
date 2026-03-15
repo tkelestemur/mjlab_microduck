@@ -59,7 +59,7 @@ FULL_COLLISION = CollisionCfg(
 actuators = DelayedActuatorCfg(
     delay_min_lag=0,  # Increased from 0 - real actuators have consistent delay
     delay_max_lag=3,  # Increased from 3 - force lower-gain control
-    base_cfg=XmlPositionActuatorCfg(joint_names_expr=(r".*",)),
+    base_cfg=XmlPositionActuatorCfg(target_names_expr=(r".*",)),
 )
 
 # actuators=XmlPositionActuatorCfg(joint_names_expr=(r".*",))
@@ -97,10 +97,10 @@ MICRODUCK_GROUND_PICK_ROBOT_CFG = EntityCfg(
 if __name__ == "__main__":
     import mujoco.viewer as viewer
     from mjlab.scene import Scene, SceneCfg
-    from mjlab.terrains import TerrainImporterCfg
+    from mjlab.terrains import TerrainEntityCfg
 
     SCENE_CFG = SceneCfg(
-        terrain=TerrainImporterCfg(terrain_type="plane"),
+        terrain=TerrainEntityCfg(terrain_type="plane"),
         entities={"robot": MICRODUCK_WALK_ROBOT_CFG},
     )
 

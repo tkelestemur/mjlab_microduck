@@ -428,7 +428,8 @@ class ImitationCommandCfg(CommandTermCfg):
     viz: VizCfg = field(default_factory=VizCfg)
     """Visualization configuration for ghost rendering."""
 
-    class_type: type[CommandTerm] = ImitationCommand
+    def build(self, env) -> ImitationCommand:
+        return ImitationCommand(self, env)
 
     def __post_init__(self):
         """Set default velocity ranges if not provided."""

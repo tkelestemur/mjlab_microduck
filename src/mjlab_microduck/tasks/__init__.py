@@ -15,8 +15,8 @@ class MicroduckOnPolicyRunner(VelocityOnPolicyRunner):
     starts at 0 on env creation.
     """
 
-    def load(self, path: str, load_optimizer: bool = True, map_location=None):
-        infos = super().load(path, load_optimizer=load_optimizer, map_location=map_location)
+    def load(self, path: str, load_cfg: dict | None = None, strict: bool = True, map_location: str | None = None):
+        infos = super().load(path, load_cfg=load_cfg, strict=strict, map_location=map_location)
         # Sync the env step counter so curricula resume at the correct stage.
         resumed_steps = self.current_learning_iteration * self.cfg["num_steps_per_env"]
         self.env.unwrapped.common_step_counter = resumed_steps

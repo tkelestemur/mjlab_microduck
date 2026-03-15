@@ -3,14 +3,14 @@
 from copy import deepcopy
 from pathlib import Path
 
-from mjlab.managers.manager_term_config import (
+from mjlab.managers import (
     CurriculumTermCfg,
     ObservationGroupCfg,
     ObservationTermCfg,
     RewardTermCfg,
+    SceneEntityCfg,
     TerminationTermCfg,
 )
-from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.tasks.velocity import mdp as velocity_mdp
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
 
@@ -83,7 +83,7 @@ def make_microduck_imitation_env_cfg(play: bool = False, ghost_vis: bool = False
 
     # Policy observations (what the robot can actually sense)
     # Build in specific order: command, phase, base_ang_vel, raw_accelerometer, joint_pos, joint_vel, actions
-    base_obs = cfg.observations["policy"].terms
+    base_obs = cfg.observations["actor"].terms
     policy_terms = {
         "command": ObservationTermCfg(
             func=imitation_mdp.velocity_command,
@@ -141,7 +141,7 @@ def make_microduck_imitation_env_cfg(play: bool = False, ghost_vis: bool = False
     }
 
     cfg.observations = {
-        "policy": ObservationGroupCfg(
+        "actor": ObservationGroupCfg(
             terms=policy_terms,
             concatenate_terms=True,
             enable_corruption=not play,
@@ -315,38 +315,38 @@ def make_microduck_imitation_env_cfg(play: bool = False, ghost_vis: bool = False
     ##
 
     if not play:
-        cfg.observations["policy"].terms["base_ang_vel"] = deepcopy(
-            cfg.observations["policy"].terms["base_ang_vel"]
+        cfg.observations["actor"].terms["base_ang_vel"] = deepcopy(
+            cfg.observations["actor"].terms["base_ang_vel"]
         )
 
         # Determine gravity/accelerometer term name based on flag
         gravity_term_name = "projected_gravity" if USE_PROJECTED_GRAVITY else "raw_accelerometer"
-        cfg.observations["policy"].terms[gravity_term_name] = deepcopy(
-            cfg.observations["policy"].terms[gravity_term_name]
+        cfg.observations["actor"].terms[gravity_term_name] = deepcopy(
+            cfg.observations["actor"].terms[gravity_term_name]
         )
 
-        cfg.observations["policy"].terms["joint_pos"] = deepcopy(
-            cfg.observations["policy"].terms["joint_pos"]
+        cfg.observations["actor"].terms["joint_pos"] = deepcopy(
+            cfg.observations["actor"].terms["joint_pos"]
         )
-        cfg.observations["policy"].terms["joint_vel"] = deepcopy(
-            cfg.observations["policy"].terms["joint_vel"]
+        cfg.observations["actor"].terms["joint_vel"] = deepcopy(
+            cfg.observations["actor"].terms["joint_vel"]
         )
 
         # Add noise and delay to observations - matched to real robot measurements
         # Noise levels measured from real robot (hanging still): gyro=0.0056 rad/s, accel=0.0017
         # Using 2.5x measured values for robustness while keeping observations useful
-        cfg.observations["policy"].terms["base_ang_vel"].delay_min_lag = 0
-        cfg.observations["policy"].terms["base_ang_vel"].delay_max_lag = 3  # 40-120ms at 50Hz
-        cfg.observations["policy"].terms["base_ang_vel"].delay_update_period = 64
-        cfg.observations["policy"].terms["base_ang_vel"].noise = Unoise(n_min=-0.024, n_max=0.024)  # 2.5x measured
+        cfg.observations["actor"].terms["base_ang_vel"].delay_min_lag = 0
+        cfg.observations["actor"].terms["base_ang_vel"].delay_max_lag = 3  # 40-120ms at 50Hz
+        cfg.observations["actor"].terms["base_ang_vel"].delay_update_period = 64
+        cfg.observations["actor"].terms["base_ang_vel"].noise = Unoise(n_min=-0.024, n_max=0.024)  # 2.5x measured
 
-        cfg.observations["policy"].terms[gravity_term_name].delay_min_lag = 0
-        cfg.observations["policy"].terms[gravity_term_name].delay_max_lag = 3
-        cfg.observations["policy"].terms[gravity_term_name].delay_update_period = 64
-        cfg.observations["policy"].terms[gravity_term_name].noise = Unoise(n_min=-0.007, n_max=0.007)  # 2.5x measured
+        cfg.observations["actor"].terms[gravity_term_name].delay_min_lag = 0
+        cfg.observations["actor"].terms[gravity_term_name].delay_max_lag = 3
+        cfg.observations["actor"].terms[gravity_term_name].delay_update_period = 64
+        cfg.observations["actor"].terms[gravity_term_name].noise = Unoise(n_min=-0.007, n_max=0.007)  # 2.5x measured
 
-        cfg.observations["policy"].terms["joint_pos"].noise = Unoise(n_min=-0.0006, n_max=0.0006)  # 2.5x measured
-        cfg.observations["policy"].terms["joint_vel"].noise = Unoise(n_min=-0.024, n_max=0.024)  # 2.5x measured
+        cfg.observations["actor"].terms["joint_pos"].noise = Unoise(n_min=-0.0006, n_max=0.0006)  # 2.5x measured
+        cfg.observations["actor"].terms["joint_vel"].noise = Unoise(n_min=-0.024, n_max=0.024)  # 2.5x measured
 
     ##
     # Domain Randomization Events (wider ranges than velocity task)
@@ -364,10 +364,10 @@ def make_microduck_imitation_env_cfg(play: bool = False, ghost_vis: bool = False
 
     cfg.curriculum = {
         "action_rate_weight": CurriculumTermCfg(
-            func=velocity_mdp.reward_weight,
+            func=velocity_mdp.reward_curriculum,
             params={
                 "reward_name": "action_rate_l2",
-                "weight_stages": [
+                "stages": [
                     # Gradually increase action smoothness penalty
                     {"step": 0, "weight": -0.6},
                     {"step": 250 * 24, "weight": -0.8},
@@ -427,19 +427,22 @@ def make_microduck_imitation_env_cfg(play: bool = False, ghost_vis: bool = False
 
 # RL configuration for imitation task
 from mjlab.rl import (
+    RslRlModelCfg,
     RslRlOnPolicyRunnerCfg,
-    RslRlPpoActorCriticCfg,
     RslRlPpoAlgorithmCfg,
 )
 
 MicroduckImitationRlCfg = RslRlOnPolicyRunnerCfg(
-    policy=RslRlPpoActorCriticCfg(
-        init_noise_std=1.0,
-        actor_obs_normalization=False,
-        critic_obs_normalization=False,
-        actor_hidden_dims=(512, 256, 128),
-        critic_hidden_dims=(512, 256, 128),
+    actor=RslRlModelCfg(
+        hidden_dims=(512, 256, 128),
         activation="elu",
+        obs_normalization=False,
+        distribution_cfg={"class_name": "GaussianDistribution", "init_std": 1.0, "std_type": "scalar"},
+    ),
+    critic=RslRlModelCfg(
+        hidden_dims=(512, 256, 128),
+        activation="elu",
+        obs_normalization=False,
     ),
     algorithm=RslRlPpoAlgorithmCfg(
         value_loss_coef=1.0,

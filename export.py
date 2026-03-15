@@ -247,26 +247,15 @@ def run_export(task_id: str, cfg: ExportConfig):
         runner.load(str(resume_path), map_location=device)
         policy = runner.get_inference_policy(device=device)
 
-    from mjlab.tasks.velocity.rl.exporter import (
-        export_velocity_policy_as_onnx,
-        attach_onnx_metadata,
-    )
+    from mjlab.rl.exporter_utils import attach_metadata_to_onnx, get_base_metadata
 
     onnx_path = os.path.abspath(cfg.onnx_file)
-    path = os.path.dirname(onnx_path)
+    onnx_dir = os.path.dirname(onnx_path)
 
-    export_velocity_policy_as_onnx(
-        runner.alg.policy,
-        path=path,
-        filename=onnx_path,
-    )
+    runner.export_policy_to_onnx(onnx_dir, os.path.basename(onnx_path))
 
-    attach_onnx_metadata(
-        runner.env.unwrapped,
-        cfg.checkpoint_file,  # type: ignore
-        path=path,
-        filename=onnx_path,
-    )
+    metadata = get_base_metadata(runner.env.unwrapped, cfg.checkpoint_file or "")
+    attach_metadata_to_onnx(onnx_path, metadata)
 
     # Add extra metadata for imitation tasks
     if is_imitation_tracking:
