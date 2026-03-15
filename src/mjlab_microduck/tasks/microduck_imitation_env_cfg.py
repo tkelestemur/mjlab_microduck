@@ -5,49 +5,36 @@ from pathlib import Path
 
 from mjlab.managers.manager_term_config import (
     CurriculumTermCfg,
-    EventTermCfg,
     ObservationGroupCfg,
     ObservationTermCfg,
     RewardTermCfg,
-    TerminationTermCfg,  # Not needed - using only fell_over from base config
+    TerminationTermCfg,
 )
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.tasks.velocity import mdp as velocity_mdp
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
 
 from mjlab_microduck.tasks import imitation_mdp, mdp as microduck_mdp
+from mjlab_microduck.tasks.domain_randomization import (
+    DomainRandomizationCfg,
+    add_domain_randomization_events,
+)
 from mjlab_microduck.tasks.imitation_command import ImitationCommandCfg
 from mjlab_microduck.tasks.microduck_velocity_env_cfg import (
     make_microduck_velocity_env_cfg,
 )
 
-# Domain randomization toggles
-ENABLE_COM_RANDOMIZATION = True
-ENABLE_KP_RANDOMIZATION = True
-ENABLE_KD_RANDOMIZATION = True
-ENABLE_MASS_INERTIA_RANDOMIZATION = True  # Can enable once walking is stable
-ENABLE_JOINT_FRICTION_RANDOMIZATION = False  # Too disruptive - affects joint movement
-ENABLE_JOINT_DAMPING_RANDOMIZATION = False  # Too disruptive - affects joint dynamics
-ENABLE_VELOCITY_PUSHES = True  # Velocity-based pushes for robustness training
-ENABLE_IMU_ORIENTATION_RANDOMIZATION = True  # Simulates mounting errors
-ENABLE_BASE_ORIENTATION_RANDOMIZATION = False  # Randomize initial tilt to force reactive behavior
-
 # Observation configuration
 USE_PROJECTED_GRAVITY = True  # If True, use projected gravity instead of raw accelerometer
 
-# Domain randomization ranges (adjust as needed)
-# Conservative ranges proven to be stable - can increase gradually if needed
-COM_RANDOMIZATION_RANGE = 0.005  # ±3mm
-MASS_INERTIA_RANDOMIZATION_RANGE = (0.90, 1.1)  # ±5% applied to BOTH mass and inertia together.
-KP_RANDOMIZATION_RANGE = (0.8, 1.2)  # ±15%
-KD_RANDOMIZATION_RANGE = (0.8, 1.2)  # ±10% (can increase to 0.8-1.2)
-JOINT_FRICTION_RANDOMIZATION_RANGE = (0.98, 1.02)  # ±2% VERY conservative - affects walking
-JOINT_DAMPING_RANDOMIZATION_RANGE = (0.98, 1.02)  # ±2% VERY conservative - affects dynamics
-VELOCITY_PUSH_INTERVAL_S = (3.0, 6.0)  # Apply pushes every 3-6 seconds
-VELOCITY_PUSH_RANGE = (-0.5, 0.5)  # Velocity change range in m/s
-IMU_ORIENTATION_RANDOMIZATION_ANGLE = 1.0  # ±2° IMU mounting error
-BASE_ORIENTATION_MAX_PITCH_DEG = 10.0  # ±10° forward/backward tilt at episode start
-BASE_ORIENTATION_MAX_ROLL_DEG = 5.0  # ±5° side-to-side tilt at episode start
+# Imitation task uses wider DR ranges than the velocity task for more robust sim2real transfer
+_IMITATION_DR = DomainRandomizationCfg(
+    com_range=0.005,  # ±5 mm (vs 3 mm default)
+    mass_inertia_range=(0.90, 1.10),  # ±10 %
+    kp_range=(0.8, 1.2),  # ±20 %
+    kd_range=(0.8, 1.2),  # ±20 %
+    velocity_push_range=(-0.5, 0.5),  # ±0.5 m/s (vs 0.3 default)
+)
 
 
 def make_microduck_imitation_env_cfg(play: bool = False, ghost_vis: bool = False):
@@ -362,120 +349,14 @@ def make_microduck_imitation_env_cfg(play: bool = False, ghost_vis: bool = False
         cfg.observations["policy"].terms["joint_vel"].noise = Unoise(n_min=-0.024, n_max=0.024)  # 2.5x measured
 
     ##
-    # Domain Randomization Events
+    # Domain Randomization Events (wider ranges than velocity task)
     ##
+    add_domain_randomization_events(cfg, _IMITATION_DR, play=play)
 
-    # Velocity-based pushes for robustness training
-    if ENABLE_VELOCITY_PUSHES:
-        # In play mode, use shorter interval for better visibility
-        interval = (0.5, 1.0) if play else VELOCITY_PUSH_INTERVAL_S
-        velocity_range = (
-            (-1.5, 1.5) if play else VELOCITY_PUSH_RANGE
-        )  # Larger pushes in play mode for visibility
-
-        cfg.events["push_robot"] = EventTermCfg(
-            func=velocity_mdp.push_by_setting_velocity,
-            mode="interval",
-            interval_range_s=interval,
-            params={
-                "velocity_range": {
-                    "x": velocity_range,
-                    "y": velocity_range,
-                },
-                "asset_cfg": SceneEntityCfg("robot"),
-            },
-        )
-
-    # CoM randomization
-    if ENABLE_COM_RANDOMIZATION:
-        cfg.events["randomize_com"] = EventTermCfg(
-            func=velocity_mdp.randomize_field,
-            mode="reset",
-            domain_randomization=True,
-            params={
-                "asset_cfg": SceneEntityCfg("robot", body_names=("trunk_base",)),
-                "operation": "add",
-                "field": "body_ipos",
-                "ranges": (-COM_RANDOMIZATION_RANGE, COM_RANDOMIZATION_RANGE),
-            },
-        )
-
-    # PD gains randomization
-    if ENABLE_KP_RANDOMIZATION or ENABLE_KD_RANDOMIZATION:
-        kp_range = KP_RANDOMIZATION_RANGE if ENABLE_KP_RANDOMIZATION else (1.0, 1.0)
-        kd_range = KD_RANDOMIZATION_RANGE if ENABLE_KD_RANDOMIZATION else (1.0, 1.0)
-        cfg.events["randomize_motor_gains"] = EventTermCfg(
-            func=microduck_mdp.randomize_delayed_actuator_gains,
-            mode="reset",
-            params={
-                "asset_cfg": SceneEntityCfg("robot"),
-                "operation": "scale",
-                "kp_range": kp_range,
-                "kd_range": kd_range,
-            },
-        )
-
-    # Mass and inertia randomization
-    if ENABLE_MASS_INERTIA_RANDOMIZATION:
-        cfg.events["randomize_mass_inertia"] = EventTermCfg(
-            func=microduck_mdp.randomize_mass_and_inertia,
-            mode="reset",
-            params={
-                "asset_cfg": SceneEntityCfg("robot", body_names=("trunk_base",)),
-                "scale_range": MASS_INERTIA_RANDOMIZATION_RANGE,
-            },
-        )
-
-    # IMU orientation randomization (simulates mounting errors)
-    if ENABLE_IMU_ORIENTATION_RANDOMIZATION:
-        cfg.events["randomize_imu_orientation"] = EventTermCfg(
-            func=microduck_mdp.randomize_imu_orientation,
-            mode="reset",
-            params={
-                "asset_cfg": SceneEntityCfg("robot"),
-                "max_angle_deg": IMU_ORIENTATION_RANDOMIZATION_ANGLE,
-            },
-        )
-
-    # Base orientation randomization (forces reactive behavior)
-    if ENABLE_BASE_ORIENTATION_RANDOMIZATION:
-        cfg.events["randomize_base_orientation"] = EventTermCfg(
-            func=microduck_mdp.randomize_base_orientation,
-            mode="reset",
-            params={
-                "asset_cfg": SceneEntityCfg("robot"),
-                "max_pitch_deg": BASE_ORIENTATION_MAX_PITCH_DEG,
-                "max_roll_deg": BASE_ORIENTATION_MAX_ROLL_DEG,
-            },
-        )
-
-    # Joint friction randomization (disabled by default)
-    if ENABLE_JOINT_FRICTION_RANDOMIZATION:
-        cfg.events["randomize_joint_friction"] = EventTermCfg(
-            func=velocity_mdp.randomize_field,
-            mode="reset",
-            domain_randomization=True,
-            params={
-                "asset_cfg": SceneEntityCfg("robot", joint_names=(r".*",)),
-                "operation": "scale",
-                "field": "dof_frictionloss",
-                "ranges": JOINT_FRICTION_RANDOMIZATION_RANGE,
-            },
-        )
-
-    # Joint damping randomization (disabled by default)
-    if ENABLE_JOINT_DAMPING_RANDOMIZATION:
-        cfg.events["randomize_joint_damping"] = EventTermCfg(
-            func=velocity_mdp.randomize_field,
-            mode="reset",
-            domain_randomization=True,
-            params={
-                "asset_cfg": SceneEntityCfg("robot", joint_names=(r".*",)),
-                "operation": "scale",
-                "field": "dof_damping",
-                "ranges": JOINT_DAMPING_RANDOMIZATION_RANGE,
-            },
-        )
+    # In play mode, use much larger pushes for visibility
+    if play and "push_robot" in cfg.events:
+        cfg.events["push_robot"].params["velocity_range"]["x"] = (-1.5, 1.5)
+        cfg.events["push_robot"].params["velocity_range"]["y"] = (-1.5, 1.5)
 
     ##
     # Curriculum - Action rate curriculum for smoother movements

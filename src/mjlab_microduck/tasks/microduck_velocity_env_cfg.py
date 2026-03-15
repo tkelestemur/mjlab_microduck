@@ -3,16 +3,11 @@
 import math
 from copy import deepcopy
 
-# Domain randomization toggles
-ENABLE_COM_RANDOMIZATION = True
-ENABLE_KP_RANDOMIZATION = True
-ENABLE_KD_RANDOMIZATION = True
-ENABLE_MASS_INERTIA_RANDOMIZATION = True  # Can enable once walking is stable
-ENABLE_JOINT_FRICTION_RANDOMIZATION = False  # Too disruptive - affects joint movement
-ENABLE_JOINT_DAMPING_RANDOMIZATION = False  # Too disruptive - affects joint dynamics
-ENABLE_VELOCITY_PUSHES = True  # Velocity-based pushes for robustness training
-ENABLE_IMU_ORIENTATION_RANDOMIZATION = True  # Simulates mounting errors
-ENABLE_BASE_ORIENTATION_RANDOMIZATION = False  # Randomize initial tilt to force reactive behavior
+from mjlab_microduck.tasks.domain_randomization import (
+    DomainRandomizationCfg,
+    add_domain_randomization_events,
+)
+
 ENABLE_NECK_OFFSET_RANDOMIZATION = True  # Random neck offsets for head-motion robustness
 
 # Neck offset randomization parameters
@@ -21,20 +16,6 @@ NECK_OFFSET_INTERVAL_S = (2.0, 5.0)  # Sample new random target every 2–5 seco
 
 # Observation configuration
 USE_PROJECTED_GRAVITY = True  # If True, use projected gravity instead of raw accelerometer
-
-# Domain randomization ranges (adjust as needed)
-# Conservative ranges proven to be stable - can increase gradually if needed
-COM_RANDOMIZATION_RANGE = 0.003  # ±3mm
-MASS_INERTIA_RANDOMIZATION_RANGE = (0.95, 1.05)  # ±5% applied to BOTH mass and inertia together.
-KP_RANDOMIZATION_RANGE = (0.85, 1.15)  # ±15%
-KD_RANDOMIZATION_RANGE = (0.9, 1.1)  # ±10% (can increase to 0.8-1.2)
-JOINT_FRICTION_RANDOMIZATION_RANGE = (0.98, 1.02)  # ±2% VERY conservative - affects walking
-JOINT_DAMPING_RANDOMIZATION_RANGE = (0.98, 1.02)  # ±2% VERY conservative - affects dynamics
-VELOCITY_PUSH_INTERVAL_S = (3.0, 6.0)  # Apply pushes every 3-6 seconds
-VELOCITY_PUSH_RANGE = (-0.3, 0.3)  # Velocity change range in m/s
-IMU_ORIENTATION_RANDOMIZATION_ANGLE = 1.0  # ±2° IMU mounting error
-BASE_ORIENTATION_MAX_PITCH_DEG = 10.0  # ±10° forward/backward tilt at episode start
-BASE_ORIENTATION_MAX_ROLL_DEG = 5.0  # ±5° side-to-side tilt at episode start
 
 import mjlab.terrains as terrain_gen
 from mjlab.terrains.terrain_generator import TerrainGeneratorCfg
@@ -361,117 +342,8 @@ def make_microduck_velocity_env_cfg(
     ].geom_names = foot_frictions_geom_names
     cfg.events["reset_base"].params["pose_range"]["z"] = (0.12, 0.13)
 
-    # Velocity-based pushes for robustness training
-    if ENABLE_VELOCITY_PUSHES:
-        # In play mode, use shorter interval for better visibility
-        interval = (0.5, 1.0) if play else VELOCITY_PUSH_INTERVAL_S
-
-        cfg.events["push_robot"] = EventTermCfg(
-            func=mdp.push_by_setting_velocity,
-            mode="interval",
-            interval_range_s=interval,
-            params={
-                "velocity_range": {
-                    "x": VELOCITY_PUSH_RANGE,
-                    "y": VELOCITY_PUSH_RANGE,
-                },
-                "asset_cfg": SceneEntityCfg("robot"),
-            },
-        )
-
-    # Domain randomization - sampled once per episode at reset
-    if ENABLE_COM_RANDOMIZATION:
-        # Randomize CoM position
-        cfg.events["randomize_com"] = EventTermCfg(
-            func=mdp.randomize_field,
-            mode="reset",
-            domain_randomization=True,
-            params={
-                "asset_cfg": SceneEntityCfg("robot", body_names=("trunk_base",)),
-                "operation": "add",
-                "field": "body_ipos",  # Body inertial position (CoM)
-                "ranges": (-COM_RANDOMIZATION_RANGE, COM_RANDOMIZATION_RANGE),
-            },
-        )
-
-    if ENABLE_KP_RANDOMIZATION or ENABLE_KD_RANDOMIZATION:
-        # Randomize motor PD gains
-        # Uses custom function that handles DelayedActuator
-        kp_range = KP_RANDOMIZATION_RANGE if ENABLE_KP_RANDOMIZATION else (1.0, 1.0)
-        kd_range = KD_RANDOMIZATION_RANGE if ENABLE_KD_RANDOMIZATION else (1.0, 1.0)
-        cfg.events["randomize_motor_gains"] = EventTermCfg(
-            func=microduck_mdp.randomize_delayed_actuator_gains,
-            mode="reset",
-            params={
-                "asset_cfg": SceneEntityCfg("robot"),
-                "operation": "scale",
-                "kp_range": kp_range,
-                "kd_range": kd_range,
-            },
-        )
-
-    if ENABLE_MASS_INERTIA_RANDOMIZATION:
-        # Randomize mass and inertia together (physically consistent)
-        # Using the same scale for both prevents invalid inertia tensors
-        cfg.events["randomize_mass_inertia"] = EventTermCfg(
-            func=microduck_mdp.randomize_mass_and_inertia,
-            mode="reset",
-            params={
-                "asset_cfg": SceneEntityCfg("robot", body_names=("trunk_base",)),
-                "scale_range": MASS_INERTIA_RANDOMIZATION_RANGE,
-            },
-        )
-
-    if ENABLE_JOINT_FRICTION_RANDOMIZATION:
-        # Randomize joint friction losses (wear, temperature effects)
-        cfg.events["randomize_joint_friction"] = EventTermCfg(
-            func=mdp.randomize_field,
-            mode="reset",
-            domain_randomization=True,
-            params={
-                "asset_cfg": SceneEntityCfg("robot", joint_names=(r".*",)),
-                "operation": "scale",
-                "field": "dof_frictionloss",
-                "ranges": JOINT_FRICTION_RANDOMIZATION_RANGE,
-            },
-        )
-
-    if ENABLE_JOINT_DAMPING_RANDOMIZATION:
-        # Randomize joint damping (lubrication, temperature effects)
-        cfg.events["randomize_joint_damping"] = EventTermCfg(
-            func=mdp.randomize_field,
-            mode="reset",
-            domain_randomization=True,
-            params={
-                "asset_cfg": SceneEntityCfg("robot", joint_names=(r".*",)),
-                "operation": "scale",
-                "field": "dof_damping",
-                "ranges": JOINT_DAMPING_RANDOMIZATION_RANGE,
-            },
-        )
-
-    # IMU orientation randomization (simulates mounting errors)
-    if ENABLE_IMU_ORIENTATION_RANDOMIZATION:
-        cfg.events["randomize_imu_orientation"] = EventTermCfg(
-            func=microduck_mdp.randomize_imu_orientation,
-            mode="reset",
-            params={
-                "asset_cfg": SceneEntityCfg("robot"),
-                "max_angle_deg": IMU_ORIENTATION_RANDOMIZATION_ANGLE,
-            },
-        )
-
-    # Base orientation randomization (forces reactive behavior)
-    if ENABLE_BASE_ORIENTATION_RANDOMIZATION:
-        cfg.events["randomize_base_orientation"] = EventTermCfg(
-            func=microduck_mdp.randomize_base_orientation,
-            mode="reset",
-            params={
-                "asset_cfg": SceneEntityCfg("robot"),
-                "max_pitch_deg": BASE_ORIENTATION_MAX_PITCH_DEG,
-                "max_roll_deg": BASE_ORIENTATION_MAX_ROLL_DEG,
-            },
-        )
+    # Domain randomization (uses shared defaults from DomainRandomizationCfg)
+    add_domain_randomization_events(cfg, DomainRandomizationCfg(), play=play)
 
     # Observations
     del cfg.observations["policy"].terms["base_lin_vel"]
